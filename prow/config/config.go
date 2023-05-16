@@ -730,6 +730,15 @@ type DefaultDecorationConfigEntry struct {
 	// ProwJob is configured to run on. Recall that ProwJobs default to running on
 	// the "default" build cluster if they omit the "cluster" field in config.
 	Cluster string `json:"cluster,omitempty"`
+	// PodPendingTimeout is after how long the controller will perform a garbage
+	// collection on pending pods. Specific for OrgRepo or Cluster. If not set, it has a fallback inside plank field.
+	PodPendingTimeout *metav1.Duration `json:"pod_pending_timeout,omitempty"`
+	// PodRunningTimeout is after how long the controller will abort a prowjob pod
+	// stuck in running state. Specific for OrgRepo or Cluster. If not set, it has a fallback inside plank field.
+	PodRunningTimeout *metav1.Duration `json:"pod_running_timeout,omitempty"`
+	// PodUnscheduledTimeout is after how long the controller will abort a prowjob
+	// stuck in an unscheduled state. Specific for OrgRepo or Cluster. If not set, it has a fallback inside plank field.
+	PodUnscheduledTimeout *metav1.Duration `json:"pod_unscheduled_timeout,omitempty"`
 
 	// Config is the DecorationConfig to apply if the filter fields all match the
 	// ProwJob. Note that when multiple entries match a ProwJob they are all used

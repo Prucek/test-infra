@@ -725,6 +725,15 @@ plank:
           # job is a periodic without extra_refs, the empty string will be used.
           # If this field is omitted all jobs will match.
           repo: ' '
+          # PodPendingTimeout is after how long the controller will perform a garbage
+          # collection on pending pods. Specific for OrgRepo or Cluster. If not set, it has a fallback inside plank field.
+          pod_pending_timeout: 0s
+          # PodRunningTimeout is after how long the controller will abort a prowjob pod
+          # stuck in running state. Specific for OrgRepo or Cluster. If not set, it has a fallback inside plank field.
+          pod_running_timeout: 0s
+          # PodUnscheduledTimeout is after how long the controller will abort a prowjob
+          # stuck in an unscheduled state. Specific for OrgRepo or Cluster. If not set, it has a fallback inside plank field.
+          pod_unscheduled_timeout: 0s
     # DefaultDecorationConfigsMap is a mapping from 'org', 'org/repo', or the
     # literal string '*', to the default decoration config to use for that key.
     # The '*' key matches all jobs. (Periodics use extra_refs[0] for matching
