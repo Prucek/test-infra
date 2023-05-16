@@ -102,6 +102,16 @@ func newFakeConfigAgent(t *testing.T, maxConcurrency int, queueCapacities map[st
 					PodPendingTimeout:     &metav1.Duration{Duration: podPendingTimeout},
 					PodRunningTimeout:     &metav1.Duration{Duration: podRunningTimeout},
 					PodUnscheduledTimeout: &metav1.Duration{Duration: podUnscheduledTimeout},
+					DefaultDecorationConfigEntries: []*config.DefaultDecorationConfigEntry{
+						{
+							OrgRepo:           "org/foo",
+							PodRunningTimeout: &metav1.Duration{Duration: time.Hour},
+						},
+						{
+							Cluster:           "trusted",
+							PodRunningTimeout: &metav1.Duration{Duration: 30 * time.Minute},
+						},
+					},
 				},
 			},
 			JobConfig: config.JobConfig{
@@ -1306,6 +1316,113 @@ func TestSyncPendingJob(t *testing.T) {
 			ExpectedURL:      "endless/aborted",
 		},
 		{
+			Name: "stale running postsubmit prow job in different org/repo",
+			PJ: prowapi.ProwJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-in-different-org-repo",
+					Namespace: "prowjobs",
+				},
+				Spec: prowapi.ProwJobSpec{
+					Type: prowapi.PostsubmitJob,
+					Refs: &prowapi.Refs{
+						Org:  "org",
+						Repo: "foo",
+					},
+				},
+				Status: prowapi.ProwJobStatus{
+					State:   prowapi.PendingState,
+					PodName: "pod-in-different-org-repo",
+				},
+			},
+			Pods: []v1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "pod-in-different-org-repo",
+						Namespace:         "pods",
+						CreationTimestamp: metav1.Time{Time: time.Now().Add(-time.Hour)},
+					},
+					Status: v1.PodStatus{
+						Phase:     v1.PodRunning,
+						StartTime: startTime(time.Now().Add(-time.Hour)),
+					},
+				},
+			},
+			ExpectedState:    prowapi.AbortedState,
+			ExpectedNumPods:  0,
+			ExpectedComplete: true,
+		},
+		{
+			Name: "stale running periodic prow job in different org/repo",
+			PJ: prowapi.ProwJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-in-different-org-repo",
+					Namespace: "prowjobs",
+				},
+				Spec: prowapi.ProwJobSpec{
+					Type: prowapi.PeriodicJob,
+					ExtraRefs: []prowapi.Refs{
+						{
+							Org:  "org",
+							Repo: "foo",
+						},
+					},
+				},
+				Status: prowapi.ProwJobStatus{
+					State:   prowapi.PendingState,
+					PodName: "pod-in-different-org-repo",
+				},
+			},
+			Pods: []v1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "pod-in-different-org-repo",
+						Namespace:         "pods",
+						CreationTimestamp: metav1.Time{Time: time.Now().Add(-time.Hour)},
+					},
+					Status: v1.PodStatus{
+						Phase:     v1.PodRunning,
+						StartTime: startTime(time.Now().Add(-time.Hour)),
+					},
+				},
+			},
+			ExpectedState:    prowapi.AbortedState,
+			ExpectedNumPods:  0,
+			ExpectedComplete: true,
+		},
+		{
+			Name: "stale running prow job in different cluster",
+			PJ: prowapi.ProwJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-in-different-cluster",
+					Namespace: "prowjobs",
+				},
+				Spec: prowapi.ProwJobSpec{
+					Type:    prowapi.PostsubmitJob,
+					Cluster: "trusted",
+				},
+				Status: prowapi.ProwJobStatus{
+					State:   prowapi.PendingState,
+					PodName: "pod-in-different-org-repo",
+				},
+			},
+			Pods: []v1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "pod-in-different-cluster",
+						Namespace:         "pods",
+						CreationTimestamp: metav1.Time{Time: time.Now().Add(-30 * time.Minute)},
+					},
+					Status: v1.PodStatus{
+						Phase:     v1.PodRunning,
+						StartTime: startTime(time.Now().Add(-30 * time.Minute)),
+					},
+				},
+			},
+			ExpectedState:    prowapi.AbortedState,
+			ExpectedNumPods:  0,
+			ExpectedComplete: true,
+		},
+		{
 			Name: "stale unschedulable prow job",
 			PJ: prowapi.ProwJob{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1524,6 +1641,11 @@ func TestSyncPendingJob(t *testing.T) {
 				pm[tc.Pods[i].ObjectMeta.Name] = tc.Pods[i]
 			}
 			fakeProwJobClient := fakectrlruntimeclient.NewFakeClient(&tc.PJ)
+
+			createDifferntClusterName := false
+			if tc.PJ.Spec.Cluster == "trusted" {
+				createDifferntClusterName = true
+			}
 			var data []runtime.Object
 			for i := range tc.Pods {
 				pod := tc.Pods[i]
@@ -1534,8 +1656,16 @@ func TestSyncPendingJob(t *testing.T) {
 				createError:              tc.Err,
 				errOnDeleteWithFinalizer: true,
 			}
-			buildClients := map[string]ctrlruntimeclient.Client{
-				prowapi.DefaultClusterAlias: fakeClient,
+
+			var buildClients map[string]ctrlruntimeclient.Client
+			if createDifferntClusterName {
+				buildClients = map[string]ctrlruntimeclient.Client{
+					"trusted": fakeClient,
+				}
+			} else {
+				buildClients = map[string]ctrlruntimeclient.Client{
+					prowapi.DefaultClusterAlias: fakeClient,
+				}
 			}
 
 			r := &reconciler{
@@ -1573,8 +1703,14 @@ func TestSyncPendingJob(t *testing.T) {
 				t.Errorf("expected BuildID %q, got %q", tc.ExpectedBuildID, actual.Status.BuildID)
 			}
 			actualPods := &v1.PodList{}
-			if err := buildClients[prowapi.DefaultClusterAlias].List(context.Background(), actualPods); err != nil {
-				t.Errorf("could not list pods from the client: %v", err)
+			if createDifferntClusterName {
+				if err := buildClients["trusted"].List(context.Background(), actualPods); err != nil {
+					t.Errorf("could not list pods from the client: %v", err)
+				}
+			} else {
+				if err := buildClients[prowapi.DefaultClusterAlias].List(context.Background(), actualPods); err != nil {
+					t.Errorf("could not list pods from the client: %v", err)
+				}
 			}
 			if got := len(actualPods.Items); got != tc.ExpectedNumPods {
 				t.Errorf("got %d pods, expected %d", len(actualPods.Items), tc.ExpectedNumPods)
