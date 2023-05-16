@@ -496,6 +496,22 @@ func (r *reconciler) syncPendingJob(ctx context.Context, pj *prowv1.ProwJob) (*r
 				break
 			}
 			maxPodRunning := r.config().Plank.PodRunningTimeout.Duration
+
+			for _, ddce := range r.config().Plank.DefaultDecorationConfigEntries {
+				if pj.Spec.Cluster == ddce.Cluster {
+					maxPodRunning = ddce.PodRunningTimeout.Duration
+				}
+				if pj.Spec.Type == prowv1.PostsubmitJob || pj.Spec.Type == prowv1.PresubmitJob {
+					if pj.Spec.Refs != nil && pj.Spec.Refs.OrgRepoString() == ddce.OrgRepo {
+						maxPodRunning = ddce.PodRunningTimeout.Duration
+					}
+				} else if pj.Spec.Type == prowv1.PeriodicJob {
+					if len(pj.Spec.ExtraRefs) > 0 && pj.Spec.ExtraRefs[0].OrgRepoString() == ddce.OrgRepo {
+						maxPodRunning = ddce.PodRunningTimeout.Duration
+					}
+				}
+			}
+
 			if pod.Status.StartTime.IsZero() || time.Since(pod.Status.StartTime.Time) < maxPodRunning {
 				// Pod is still running. Do nothing.
 				return nil, nil
