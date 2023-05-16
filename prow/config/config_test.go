@@ -5167,6 +5167,42 @@ default_decoration_config_entries:
 			},
 		},
 		{
+			name: "OrgRepo,Cluster timeouts",
+			raw: `
+default_decoration_config_entries:
+  - repo: "org"
+    pod_running_timeout: 3h
+  - repo: "org/repo"
+    pod_running_timeout: 2h
+  - repo: "org/foo"
+    pod_running_timeout: 1h
+  - cluster: "trusted"
+    pod_running_timeout: 30m
+`,
+			expected: []*DefaultDecorationConfigEntry{
+				{
+					OrgRepo:           "org",
+					Cluster:           "",
+					PodRunningTimeout: &metav1.Duration{Duration: 3 * time.Hour},
+				},
+				{
+					OrgRepo:           "org/repo",
+					Cluster:           "",
+					PodRunningTimeout: &metav1.Duration{Duration: 2 * time.Hour},
+				},
+				{
+					OrgRepo:           "org/foo",
+					Cluster:           "",
+					PodRunningTimeout: &metav1.Duration{Duration: 1 * time.Hour},
+				},
+				{
+					OrgRepo:           "",
+					Cluster:           "trusted",
+					PodRunningTimeout: &metav1.Duration{Duration: 30 * time.Minute},
+				},
+			},
+		},
+		{
 			name: "both formats, expect error",
 			raw: `
 default_decoration_configs:
