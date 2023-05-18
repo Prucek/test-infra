@@ -503,22 +503,8 @@ func (r *reconciler) syncPendingJob(ctx context.Context, pj *prowv1.ProwJob) (*r
 			if pod.DeletionTimestamp != nil {
 				break
 			}
-			maxPodRunning := r.config().Plank.PodRunningTimeout.Duration
 
-			for _, ddce := range r.config().Plank.DefaultDecorationConfigEntries {
-				if pj.Spec.Cluster == ddce.Cluster {
-					maxPodRunning = ddce.PodRunningTimeout.Duration
-				}
-				if pj.Spec.Type == prowv1.PostsubmitJob || pj.Spec.Type == prowv1.PresubmitJob {
-					if pj.Spec.Refs != nil && pj.Spec.Refs.OrgRepoString() == ddce.OrgRepo {
-						maxPodRunning = ddce.PodRunningTimeout.Duration
-					}
-				} else if pj.Spec.Type == prowv1.PeriodicJob {
-					if len(pj.Spec.ExtraRefs) > 0 && pj.Spec.ExtraRefs[0].OrgRepoString() == ddce.OrgRepo {
-						maxPodRunning = ddce.PodRunningTimeout.Duration
-					}
-				}
-			}
+			maxPodRunning := calculatePodTimeout(r, pj, PodRunningTimeout)
 
 			if pod.Status.StartTime.IsZero() || time.Since(pod.Status.StartTime.Time) < maxPodRunning {
 				// Pod is still running. Do nothing.
@@ -582,6 +568,56 @@ func (r *reconciler) syncPendingJob(ctx context.Context, pj *prowv1.ProwJob) (*r
 	}
 
 	return nil, nil
+}
+
+// gets the timeout for the given timeout type from the prow config or the default decoration config entry
+// if the default decoration config entry is nil, the prow config value is used
+func getTimeoutFromConfig(config *config.Config, timeout timeout, ddce *config.DefaultDecorationConfigEntry) time.Duration {
+	switch timeout {
+	case PodRunningTimeout:
+		if ddce != nil && ddce.PodRunningTimeout != nil {
+			return ddce.PodRunningTimeout.Duration
+		} else {
+			return config.Plank.PodRunningTimeout.Duration
+		}
+	case PodPendingTimeout:
+		if ddce != nil && ddce.PodPendingTimeout != nil {
+			return ddce.PodPendingTimeout.Duration
+		} else {
+			return config.Plank.PodPendingTimeout.Duration
+		}
+	case PodUnscheduledTimeout:
+		if ddce != nil && ddce.PodUnscheduledTimeout != nil {
+			return ddce.PodUnscheduledTimeout.Duration
+		} else {
+			return config.Plank.PodUnscheduledTimeout.Duration
+		}
+	default:
+		return 0
+	}
+}
+
+// calculatePodTimeout returns the timeout for the given timeout type for the given prowjob
+func calculatePodTimeout(r *reconciler, pj *prowv1.ProwJob, timeout timeout) time.Duration {
+	maxPodTimeout := getTimeoutFromConfig(r.config(), timeout, nil)
+
+	for _, ddce := range r.config().Plank.DefaultDecorationConfigEntries {
+		ddcePodTimeout := getTimeoutFromConfig(r.config(), timeout, ddce)
+
+		if pj.Spec.Cluster == ddce.Cluster {
+			maxPodTimeout = ddcePodTimeout
+		}
+		if pj.Spec.Type == prowv1.PostsubmitJob || pj.Spec.Type == prowv1.PresubmitJob {
+			if pj.Spec.Refs != nil && pj.Spec.Refs.OrgRepoString() == ddce.OrgRepo {
+				maxPodTimeout = ddcePodTimeout
+			}
+		} else if pj.Spec.Type == prowv1.PeriodicJob {
+			if len(pj.Spec.ExtraRefs) > 0 && pj.Spec.ExtraRefs[0].OrgRepoString() == ddce.OrgRepo {
+				maxPodTimeout = ddcePodTimeout
+			}
+		}
+	}
+	return maxPodTimeout
 }
 
 // syncTriggeredJob syncs jobs that do not yet have an associated test workload running
