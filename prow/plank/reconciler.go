@@ -164,6 +164,14 @@ type shardedLock struct {
 	locks   map[string]*semaphore.Weighted
 }
 
+type timeout string
+
+const (
+	PodRunningTimeout     timeout = "PodRunningTimeout"
+	PodPendingTimeout     timeout = "PodPendingTimeout"
+	PodUnscheduledTimeout timeout = "PodUnscheduledTimeout"
+)
+
 func (s *shardedLock) getLock(key string) *semaphore.Weighted {
 	s.mapLock.Lock()
 	defer s.mapLock.Unlock()
